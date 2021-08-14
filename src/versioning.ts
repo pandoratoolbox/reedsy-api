@@ -6,6 +6,13 @@ import diff_match_patch, {
   DIFF_DELETE,
 } from './diff_match_patch';
 
+
+var dmp = new diff_match_patch();
+var doc_count = 0;
+
+const { deflateSync, unzipSync } = require('zlib');
+
+
 //We'll leave this for another time
 function lcsLength(a: string, b: string) {
   let s = 0;
@@ -32,19 +39,18 @@ function lcsLength(a: string, b: string) {
   return c;
 }
 
-var dmp = new diff_match_patch();
-var doc_count = 0;
+
 
 export class Document {
   id: number;
-  text: string;
+  text: Buffer;
   version: number;
   original_version_id: number | undefined;
   created_at: Date | undefined;
 
   constructor(data: Partial<Document>) {
     this.id = data.id ? data.id : 1;
-    this.text = data.text ? data.text : '';
+    this.text =  data.text ? deflateSync(data.text) : deflateSync('');
     this.version = data.version ? data.version : 1;
     this.original_version_id = data.original_version_id;
     this.created_at = data.created_at;
@@ -63,14 +69,14 @@ export class Document {
     let v_text = '';
     for (let o = 0; o < this.version; o++) {
       if (o == 0) {
-        v_text = oray[o].text;
+        v_text =  unzipSync(oray[o].text).toString();
         continue;
       }
 
-      v_text = combine(v_text, oray[o].text);
+      v_text = combine(v_text,  unzipSync(oray[o].text).toString());
     }
 
-    return v_text;
+    return v_text
   }
 
   update(upd: string) {
@@ -82,28 +88,36 @@ export class Document {
       let v_text = '';
       for (let o = 0; o < oray.length; o++) {
         if (o == 0) {
-          v_text = oray[o].text;
+          v_text = unzipSync(oray[o].text).toString()
           continue;
         }
 
-        v_text = combine(v_text, oray[o].text);
+        let processed =  unzipSync(oray[o].text).toString()
+        v_text = combine(v_text, processed);
       }
 
-      console.log('VTEXT:' + v_text);
-      updated.text = difference(v_text, upd);
+      updated.setText(difference(v_text, upd));
       //   updated.text = difference(omap?.get(1)?.text ?? '', upd); //this saved the difference from the original version, it's faster to save/retrieve but takes up more disk space
       updated.original_version_id = this.original_version_id;
       //increment version of new document
       updated.version = this.version + 1;
     } else {
       //compare current text (there are no other versions) to new text and save the different to version 2
-      updated.text = difference(this.text, upd);
+      updated.setText(difference(this.text.toString('base64'), upd));
       //updated.previous_version_id = this.id
       updated.original_version_id = this.id;
       //new document version must be 2, if current document has no previous versions (implies current version is 1)
       updated.version = 2;
     }
     updated.commit();
+  }
+
+  setText(input: string) {
+    this.text = deflateSync(input)
+  }
+
+  readText() {
+    return unzipSync(this.text).toString()
   }
 
   commit() {
@@ -177,9 +191,8 @@ function getDocumentVersion(parent_id: number, version: number) {
 }
 
 export function testVersioning() {
-  let test = new Document({
-    text: 'Lorem ipsum dolor sit amet, consectetur adipiscing elit. Pellentesque non tempor risus. Quisque ut dictum nunc, at cursus dolor. Vestibulum ut nibh venenatis, luctus eros ac, porttitor ex. Vestibulum tempor tortor eu justo porttitor, sit amet faucibus erat porttitor. Pellentesque id magna sed ex feugiat viverra. Ut laoreet lacinia felis non dignissim. Fusce hendrerit orci ac tortor consequat pulvinar. Suspendisse a varius orci. Praesent rutrum arcu a massa tempor lacinia. Aliquam interdum velit sed lorem dignissim aliquet. Maecenas efficitur sem eget dui aliquam, sed aliquet magna bibendum. Sed sapien ex, sodales nec pellentesque ac, vestibulum sit amet nunc. Nullam sagittis ultricies velit, sit amet iaculis eros. Aliquam efficitur facilisis sapien, vel sodales ligula porta sit amet.',
-  });
+  let test = new Document({})
+  test.setText('Lorem ipsum dolor sit amet, consectetur adipiscing elit. Pellentesque non tempor risus. Quisque ut dictum nunc, at cursus dolor. Vestibulum ut nibh venenatis, luctus eros ac, porttitor ex. Vestibulum tempor tortor eu justo porttitor, sit amet faucibus erat porttitor. Pellentesque id magna sed ex feugiat viverra. Ut laoreet lacinia felis non dignissim. Fusce hendrerit orci ac tortor consequat pulvinar. Suspendisse a varius orci. Praesent rutrum arcu a massa tempor lacinia. Aliquam interdum velit sed lorem dignissim aliquet. Maecenas efficitur sem eget dui aliquam, sed aliquet magna bibendum. Sed sapien ex, sodales nec pellentesque ac, vestibulum sit amet nunc. Nullam sagittis ultricies velit, sit amet iaculis eros. Aliquam efficitur facilisis sapien, vel sodales ligula porta sit amet.');
   //save document 1
   test.commit();
   //update document 1, adds version 2
@@ -200,13 +213,15 @@ export function testVersioning() {
   //all versions of document 1
   let omap = document_map.get(1);
 
-  //let's see what happens when we read version 3
+  //let's see what happens when we read version 1 & 3
+  console.log(omap?.get(1)?.read());
   console.log(omap?.get(3)?.read());
 
-  let doc2 = new Document({text: "Pretty good?"})
+  let doc2 = new Document({})
+  doc2.setText('Pretty good?')
   doc2.commit()
   doc2.update("Could be better if we had more time")
 
   console.log(document_map)
-  console.log("Now our document versioning system is complete and ready to work with.")
+  console.log("Now our document versioning system is complete and ready to work with. (Including compression optimizations)")
 }
